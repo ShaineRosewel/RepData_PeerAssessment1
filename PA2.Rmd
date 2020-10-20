@@ -1,0 +1,265 @@
+---
+title: "Reproducible Research: Peer Assessment 2"
+author: Shaine R.
+output: 
+  html_document:
+    keep_md: true
+    theme: united
+    highlight: zenburn
+    df_print: paged
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center")
+```
+
+The basic goal of this assignment is to explore the NOAA Storm Database and answer some basic questions about severe weather events. You must use the database to answer the questions below and show the code for your entire analysis. Your analysis can consist of tables, figures, or other summaries. You may use any R package you want to support your analysis.
+
+Questions: Your data analysis must address the following questions:
+
+1. Across the United States, which types of events (as indicated in the EVTYPE are most harmful with respect to population health?
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+***
+
+Download the file. (`mode = wb` for Windows)
+
+```{r eval = FALSE}
+path <- "C:/Users/shain/Desktop/Reproducible Research/"
+url<-"https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+destfile <- paste0(path, "stormdata.csv.bz2")
+download.file(url, destfile, mode="wb")
+```
+
+# Exploring Damage from Disasters
+
+## Synopsis
+
+The task is to determine the types of events which 1. are most harmful with respect to population health and 2. have the greatest economic consequences. The first one is determined by individually looking at the total number of fatalities and injuries caused by each disaster while the second, at the cost of property and crop damage. No in depth analysis was made and no detailed fixing of names under variable `EVTYPE` was done except from removing extra white spaces, setting font to uppercase, and targeting some manner of naming and some misspellings. By observing sums, tornado is shown to be the most harmful to people's health and flood, to have the greatest economic consequences.
+
+## Data Processing {.tabset}
+
+Read the data
+
+```{r, cache = TRUE}
+data <- read.csv("repdata_data_StormData.csv.bz2")
+str(data)
+```
+
+```{r}
+library(magrittr)
+library(dplyr)
+library(ggplot2)
+```
+
+Get the relevant data
+
+**EVTYPE**. Type of disastrous event.
+
+**CROPDMG**. Crop damage in K/ M/ B dollars
+
+**CROPDMGEXP**. Denomination: K = 1 000, M = 1 000 000, B = 1 000 000 000 
+
+**PROPDMG**. Property damage in K/ M/ B dollars
+
+**PROPDMGEXP**. Denomination: K = 1 000, M = 1 000 000, B = 1 000 000 000 
+
+**FATALITIES**. Number of cases of deaths.
+
+**INJURIES**. Number of cases of injuries.
+
+```{r}
+# get relevant data
+dat <- data[, c("EVTYPE", "CROPDMG", "CROPDMGEXP", "PROPDMG", "PROPDMGEXP", "FATALITIES", "INJURIES")]
+
+# prelim cleaning: set to UPPERCASE and remove extra white spaces
+dat$EVTYPE <- stringr::str_squish(stringr::str_to_upper(dat$EVTYPE))
+dat$CROPDMGEXP <- stringr::str_squish(stringr::str_to_upper(dat$CROPDMGEXP))
+dat$PROPDMGEXP <- stringr::str_squish(stringr::str_to_upper(dat$PROPDMGEXP))
+
+dat
+```
+
+### Some more cleaning
+
+`EVTYPE` is actually messy. It contains irrelevant and some misspelled entries and sometimes multiple names of events. This is difficult to fix and will definitely conceal facts.
+
+```{r}
+dat1 <- dat %>% group_by(EVTYPE) %>% summarise(num = n()) 
+dat1 %>% arrange(EVTYPE)
+```
+
+To partially improve it, observe misspellings in the top 100 commonly occurring `EVTYPES` and fix accordingly.
+
+```{r}
+dat1 <- dat %>% group_by(EVTYPE) %>% summarise(num = n()) %>% top_n(100, wt=num)
+dat1 %>% arrange(EVTYPE)
+```
+
+This is manually done and can be improved to cover all misspellings.
+
+```{r}
+dat$EVTYPE <- gsub(pattern = "TSTM", replacement = "THUNDERSTORM", x = dat$EVTYPE)
+dat$EVTYPE <- gsub(pattern = "WINDS{1,2}", replacement = "WIND", x = dat$EVTYPE)
+dat$EVTYPE <- gsub(pattern = "(FLOODING)|(FLOODS)", replacement = "FLOOD", x = dat$EVTYPE)
+dat$EVTYPE <- gsub(pattern = "RIP CURRENTS", replacement = "RIP CURRENT", x = dat$EVTYPE)
+dat$EVTYPE <- gsub(pattern = "URBAN/SML STREAM FLD", replacement = "URBAN/SMALL STREAM FLOOD", x = dat$EVTYPE)
+dat$EVTYPE <- gsub(pattern = "CLOUDS", replacement = "CLOUD", x = dat$EVTYPE)
+dat$EVTYPE <- gsub(pattern = "FLOOD/FLASH FLOOD", replacement = "FLASH FLOOD/FLOOD", x = dat$EVTYPE)
+
+dat1 <- dat %>% group_by(EVTYPE) %>% summarise(num = n()) %>% top_n(100, wt=num)
+dat1 %>% arrange(EVTYPE)
+```
+
+### Preprocessing for plotting
+
+Preprocessing of `dat` was done for plotting to address the first task.
+
+```{r}
+# consider only the first, sixth, and seventh columns
+dat2.1 <- dat[, c(1,6:7)]
+colnames(dat2.1)
+```
+
+```{r}
+# sum fatalities according to evtype, sum injuries according to evtype
+dat2.1 <- cbind(aggregate(FATALITIES ~ EVTYPE, dat2.1,  sum),
+      INJURIES=aggregate(INJURIES ~ EVTYPE, dat2.1,  sum)[,2])
+
+# get the sum of fatalities and injuries for each evtype
+dat2_add.1 <- apply(dat2.1[, -1], 1, sum)
+
+# bind dat2 and dat2_add.1 (sum previously taken)
+dat3.1 <- cbind(dat2.1, dat2_add.1)
+
+# only consider for plotting the 20 events with largest sum
+dat4.1 <- top_n(dat3.1, 20, wt=dat2_add.1)
+
+# tidy formatting for plotting
+dat5.1 <- dat4.1 %>% tidyr::pivot_longer(cols = c(FATALITIES, INJURIES), names_to = "VAR")
+
+# set as factor
+dat5.1$VAR <- factor(dat5.1$VAR)
+
+dat5.1
+```
+
+Preprocessing for the second task: Use only the relevant columns.
+
+```{r}
+# only needed data for task 1: crop damage
+one <- dat[, 1:3]
+colnames(one)
+```
+
+Limit data to `CROPDMGEXP` with proper entries. If it is empty, I assumed 0 crop damage cost. Here, `B`, `K`, `M` are replace with corresponding value.
+
+```{r}
+# do not consider events that do not have units
+one.0 <- one %>% filter(CROPDMGEXP %in% c("B", "K", "M",""))
+
+# replace with appropriate numerical assignment
+one.0$CROPDMGEXP[which(one.0$CROPDMGEXP == "B")] <- 1e9
+one.0$CROPDMGEXP[which(one.0$CROPDMGEXP == "M")] <- 1e6
+one.0$CROPDMGEXP[which(one.0$CROPDMGEXP == "K")] <- 1e3
+one.0$CROPDMGEXP[which(one.0$CROPDMGEXP == "")] <- 0
+
+# set as numeric
+one.0$CROPDMGEXP <- as.numeric(one.0$CROPDMGEXP)
+
+# multiply to get the actual amount
+one.1 <- cbind(one.0, PRODCROP = apply(one.0[, 2:3], 1, prod))
+
+# set EVTYPE as factor
+one.1$EVTYPE <- factor(one.1$EVTYPE)
+
+head(one.1)
+```
+
+Repeat the process above for the property damage.
+
+```{r}
+# only needed data for task 1: property damage and repeat the same processing done for crop damage
+two <- dat[, c(1,4,5)]
+two.0 <- two %>% filter(PROPDMGEXP %in% c("B", "K", "M", ""))
+two.0$EVTYPE <- factor(two.0$EVTYPE) 
+
+two.0$PROPDMGEXP[which(two.0$PROPDMGEXP == "B")] <- 1e9
+two.0$PROPDMGEXP[which(two.0$PROPDMGEXP == "M")] <- 1e6
+two.0$PROPDMGEXP[which(two.0$PROPDMGEXP == "K")] <- 1e3
+two.0$PROPDMGEXP[which(two.0$PROPDMGEXP == "")] <- 0
+two.0$PROPDMGEXP <- as.numeric(two.0$PROPDMGEXP)
+two.1 <- cbind(two.0, PRODPROP = apply(two.0[, 2:3], 1, prod))
+two.1$EVTYPE <- factor(two.1$EVTYPE)
+
+head(two.1)
+```
+
+Combine the data for crop and property damage.
+
+```{r}
+# get only evtype and product (computed cost)
+con1 <- one.1[, c(1, 4)]
+CRP <- cbind(DAMAGE = rep("crop", nrow(con1)), con1)
+colnames(CRP)[3] <- "NUM"
+
+# get only evtype and product (computed cost)
+con2 <- two.1[, c(1, 4)]
+PRP <- cbind(DAMAGE = rep("property", nrow(con2)), con2)
+colnames(PRP)[3] <- "NUM"
+
+# rowbind the data for rop and property damage and set evtype and damage type as factor
+econ <- rbind(CRP, PRP)
+econ$DAMAGE <- factor(econ$DAMAGE)
+econ$EVTYPE <- factor(econ$EVTYPE)
+
+# form a dataset to be used for ordering bars in the plot later
+econ.0 <- econ %>% group_by(DAMAGE, EVTYPE) %>% summarise(TOTAL = sum(NUM))
+orderer <- aggregate(TOTAL ~ EVTYPE, econ.0, sum) %>% arrange(desc(TOTAL)) %>% top_n(20)
+orderer$EVTYPE <-factor(orderer$EVTYPE)
+econ.1 <- econ.0 %>% filter(EVTYPE %in% orderer$EVTYPE)
+econ.2 <- left_join(x = econ.1, y=orderer, by="EVTYPE")
+
+econ.2
+```
+
+## Results
+
+To address the first task, a plot displaying the top 20 events with respect to the total number of reported occurrences is presented below. It shows that tornado brought the greatest damage to people's health. For this exercise, occurrences of fatality and injury are used to determine health damage.
+
+```{r}
+# use dat2_add.1 to reorder the stacked bars
+ggplot(dat5.1, aes(x=reorder(EVTYPE, dat2_add.1), y = value, fill = VAR)) +
+  geom_bar(stat = "identity", position = "stack") +
+  coord_flip() +
+  theme_bw() +
+  theme(axis.text=element_text(size=8))+
+  ggtitle("Health Damage due to Disasters") +
+  ylab("Total Number of Reported Occurrence") +
+  xlab(NULL) +
+  scale_fill_discrete(name = "Damage in terms of", labels = c("Fatalities", "Injuries"))
+```
+
+To address the second task, another plot is presented below. Again, only the top 20 but this time with respect to damage cost in dollars is shown. It says that flood brought the greatest damage to crops and properties. For this simple exercise, damage to crops and properties is used to determine economic losses.
+
+```{r}
+ggplot(econ.2, aes(x=reorder(EVTYPE, TOTAL.y), y = TOTAL.x, fill = DAMAGE)) +
+  geom_bar(stat = "identity", position = "stack") +
+  coord_flip() +
+  theme_bw() +
+  theme(axis.text=element_text(size=8)) +
+  ggtitle("Economic Damage due to Disasters") +
+  ylab("Cost of Damage in Dollars") +
+  xlab(NULL) +
+  scale_fill_discrete(name = "Damage to", labels = c("Crops", "Properties"))
+```
+
+NOTE: Purely exploratory and data need to be processed for further cleaning and better insights.
+
+
+
+
+
